@@ -1,21 +1,37 @@
-import { useState } from "react";
-import Papa from 'papaparse';
-import presets from "../presets";
+import React, { Dispatch, SetStateAction, useState } from "react";
+import Papa, { ParseResult } from 'papaparse';
+import { FieldValue } from "../type/Data";
+import { Preset } from "../type/Preset";
+import { useReadLocalStorage  } from "usehooks-ts";
 
-const UploadComponent = ({ setCsv }) => {
-  const [step, setStep] = useState(0);
-  const [data, setData] = useState([]);
+enum Step {
+  upload,
+  matchedPreset,
+  mappingError,
+  parsingError,
+  success,
+}
 
-  const dataHandler = data => {
+type Props = {
+  setCsv: Dispatch<SetStateAction<any>>
+}
+
+const UploadComponent = ({ setCsv }: Props) => {
+  const presets = useReadLocalStorage<Preset[]>('presets') || [];
+  const [step, setStep] = useState(Step.upload);
+  const [data, setData] = useState([] as FieldValue[][]);
+
+  const dataHandler = (data: ParseResult<FieldValue[]>) => {
     if (data.errors.length) {
-      setStep(-1);
+      setStep(Step.parsingError);
       return;
     }
     setData(data.data);
-    setStep(1);
+    setStep(Step.matchedPreset);
   }
 
-  const handleUpload = e => {
+  const handleUpload = (e: React.SyntheticEvent<HTMLInputElement>) => {
+    // @ts-ignore
     const file = e.target.files[0];
 
     if (file) {
@@ -23,20 +39,20 @@ const UploadComponent = ({ setCsv }) => {
         delimiter: ",",
         skipEmptyLines: true,
         complete: dataHandler,
-        error: () => setStep(-1),
+        error: () => setStep(Step.parsingError),
       });
     }
   }
 
-  const getStep1 = () => (
+  const getUploadStep = () => (
     <article>
-      <header>Step 1: Upload the file</header>
+      <header>Step 1: Choose the file</header>
       <input type="file" onChange={ handleUpload }/>
     </article>
   )
 
-  const getStep2 = () => {
-    let matchedPreset;
+  const getMatchedPresetStep = () => {
+    let matchedPreset: Preset | undefined;
     const headers = data[0];
 
     presets.forEach(preset => {
@@ -45,17 +61,22 @@ const UploadComponent = ({ setCsv }) => {
       }
     });
 
-    const handleYes = e => {
+    if (!matchedPreset) {
+      setStep(Step.mappingError);
+      return;
+    }
+
+    const handleYes = (e: React.SyntheticEvent<HTMLAnchorElement>) => {
       e.preventDefault();
 
-      const indexes = [];
-      matchedPreset.to.forEach(col => {
+      const indexes: number[] = [];
+      matchedPreset?.convertTo.forEach(col => {
         const index = data[0].findIndex(el => el === col);
         indexes.push(index);
       });
 
       const converted = data.map(row => {
-        const newRow = [];
+        const newRow: FieldValue[] = [];
         indexes.forEach(index => {
           newRow.push(row[index]);
         });
@@ -64,18 +85,18 @@ const UploadComponent = ({ setCsv }) => {
 
       setCsv(converted);
 
-      setStep(3);
+      setStep(Step.success);
     }
 
-    const handleNo = e => {
+    const handleNo = (e: React.SyntheticEvent<HTMLAnchorElement>) => {
       e.preventDefault();
-      setStep(step + 1);
+      setStep(Step.mappingError);
     }
 
     return (
       <article>
         <header>Step 2: Pattern</header>
-        { matchedPreset ? `Recognized as '${ matchedPreset.name }'. Is it correct?` : 'Could not find preset' }
+        Recognized as { matchedPreset.name }
         <footer>
           <a href="#" role="button" onClick={ handleYes }>Yes</a>&nbsp;
           <a href="#" role="button" onClick={ handleNo } className="secondary">No</a>
@@ -84,31 +105,25 @@ const UploadComponent = ({ setCsv }) => {
     )
   }
 
-  const getStep3 = () => {
-    return (
-      <article>
-        <header>Step 3: Specify fields</header>
-        Work in progress. Please update your presets
-      </article>
-    )
-  }
 
-  const getStep4 = () => <article style={{ background: 'var(--ins-color)', color: '#fff', padding: '20px 40px'}}>File uploaded and processed</article>;
+  const getMappingErrorStep = () => <article className="alert error">Could not find specific preset for this file</article>;
+  const getParsingErrorStep = () => <article className="alert error">Parsing error. Please make sure your file is correct csv with correct delimiter</article>;
 
-  const getError = () => <article style={{ background: 'var(--del-color)', color: '#fff', padding: '20px 40px'}}>Something went wrong. Try again</article>;
+  const getSuccessStep = () => <article className="alert success">File uploaded and processed</article>;
 
   switch (step) {
-    case 0:
-      return getStep1();
-    case 1:
-      return getStep2();
-    case 2:
-      return getStep3();
-    case 3:
-      return getStep4();
-    case -1:
+    case Step.upload:
+      return getUploadStep();
+    case Step.matchedPreset:
+      return getMatchedPresetStep();
+    case Step.mappingError:
+      return getMappingErrorStep();
+    case Step.success:
+      return getSuccessStep();
+    case Step.parsingError:
+      return getParsingErrorStep()
     default:
-      return getError()
+      return null;
   }
 }
 
